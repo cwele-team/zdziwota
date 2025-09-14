@@ -15,7 +15,14 @@
     <!-- Main Content -->
     <main class="main-content">
         <div class="category-container">
-            <!-- Category filter will be inserted here by JavaScript -->
+            <div class="category-filter">
+                <div class="category-header">
+                    <h2>Wybierz kategorię</h2>
+                </div>
+                <div class="category-tags" id="category-tags">
+                    <!-- Category buttons will be inserted here by JavaScript -->
+                </div>
+            </div>
             <div class="movie-grid">
                 <!-- Movies will be inserted here by JavaScript -->
             </div>

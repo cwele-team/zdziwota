@@ -479,6 +479,7 @@ async function ensureCategoriesLoaded() {
     // Initialize category page
     async function initializeCategoryPage() {
       await ensureMoviesLoaded();
+      await ensureCategoriesLoaded();
       const categoryContainer = document.querySelector('.category-container');
       if (!categoryContainer) return;
 
@@ -490,31 +491,30 @@ async function ensureCategoriesLoaded() {
       // Get category from URL if present
       const urlParams = new URLSearchParams(window.location.search);
       const selectedCategory = urlParams.get('category');
+      console.log('Selected category from URL:', selectedCategory);
 
-      // Create category filter
-      const filterHTML = `
-        <div class="category-filter">
-          <label for="category-search" class="sr-only">Szukaj kategorii</label>
-          <input type="text" id="category-search" placeholder="Szukaj kategorii..." class="category-search" aria-label="Wyszukaj kategorie filmów">
-          <div class="category-tags">
-            <button class="category-tag${!selectedCategory ? ' active' : ''}" data-category="all" aria-pressed="${!selectedCategory}">Wszystkie</button>
-            ${Array.from(new Set(movies.flatMap(movie => movie.categories))).map(category =>
-              `<button class="category-tag${selectedCategory === category ? ' active' : ''}" data-category="${category}" aria-pressed="${selectedCategory === category}">${category}</button>`
-            ).join('')}
-          </div>
-        </div>
-      `;
+      // Create category filter using database categories
+      const categoryTagsContainer = document.getElementById('category-tags');
+      if (categoryTagsContainer) {
+        let categoryButtonsHTML = `<button class="category-tag${!selectedCategory ? ' active' : ''}" data-category="all" aria-pressed="${!selectedCategory}">Wszystkie</button>`;
+        
+        categories.forEach(category => {
+          const isActive = selectedCategory === category.name;
+          categoryButtonsHTML += `<button class="category-tag${isActive ? ' active' : ''}" data-category="${category.name}" aria-pressed="${isActive}">${category.name}</button>`;
+        });
+        
+        categoryTagsContainer.innerHTML = categoryButtonsHTML;
+      }
 
-      categoryContainer.insertAdjacentHTML('afterbegin', filterHTML);
-
-      const categorySearch = document.querySelector('#category-search');
       const categoryTags = document.querySelectorAll('.category-tag');
       const movieGrid = document.querySelector('.movie-grid');
 
       // Display initial movies based on selected category
       const initialMovies = selectedCategory ?
-        movies.filter(movie => movie.categories.includes(selectedCategory)) :
+        movies.filter(movie => movie.categories && movie.categories.includes(selectedCategory)) :
         movies;
+
+      console.log('Initial movies to display:', initialMovies.length);
 
       movieGrid.innerHTML = initialMovies.map((movie, index) => {
         const originalIndex = movies.findIndex(m => m.title === movie.title);
@@ -523,36 +523,38 @@ async function ensureCategoriesLoaded() {
 
       setupMovieOverlay();
 
-      // Search functionality
-      categorySearch.addEventListener('input', (e) => {
-        const searchTerm = e.target.value.toLowerCase();
-        categoryTags.forEach(tag => {
-          const category = tag.textContent;
-          if (category === 'Wszystkie' || category.toLowerCase().includes(searchTerm)) {
-            tag.style.display = 'block';
-          } else {
-            tag.style.display = 'none';
-          }
-        });
-      });
-
       // Category filtering
       categoryTags.forEach(tag => {
         tag.addEventListener('click', () => {
+          const selectedCategoryName = tag.dataset.category;
+          console.log('Category clicked:', selectedCategoryName);
+          
+          // Update active state
           categoryTags.forEach(t => t.classList.remove('active'));
           tag.classList.add('active');
+          categoryTags.forEach(t => {
             t.setAttribute('aria-pressed', 'false');
+          });
           tag.setAttribute('aria-pressed', 'true');
 
-          const selectedCategory = tag.dataset.category;
-          const filteredMovies = selectedCategory === 'all' ?
+          // Filter movies
+          const filteredMovies = selectedCategoryName === 'all' ?
             movies :
-            movies.filter(movie => movie.categories.includes(selectedCategory));
+            movies.filter(movie => movie.categories && movie.categories.includes(selectedCategoryName));
 
+          console.log('Filtered movies:', filteredMovies.length);
+
+          // Update movie grid
           movieGrid.innerHTML = filteredMovies.map((movie, index) => {
             const originalIndex = movies.findIndex(m => m.title === movie.title);
             return createMovieCard(movie, originalIndex);
           }).join('');
+
+          // Update URL without page reload
+          const newUrl = selectedCategoryName === 'all' ? 
+            window.location.pathname : 
+            `${window.location.pathname}?category=${encodeURIComponent(selectedCategoryName)}`;
+          window.history.pushState({}, '', newUrl);
 
           setupMovieOverlay();
         });
