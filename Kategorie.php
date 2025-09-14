@@ -15,6 +15,33 @@
     <!-- Main Content -->
     <main class="main-content">
         <div class="category-container">
+            <!-- Search Section -->
+            <div class="search-section">
+                <div class="search-header">
+                    <h2>Wyszukaj filmy</h2>
+                </div>
+                <div class="search-container">
+                    <div class="search-input-wrapper">
+                        <i data-lucide="search" class="search-icon"></i>
+                        <input 
+                            type="text" 
+                            id="movie-search-input" 
+                            class="search-input" 
+                            placeholder="Wyszukaj filmy po tytule, kategorii, opisie..."
+                            autocomplete="off"
+                            aria-label="Wyszukaj filmy"
+                        >
+                        <button id="clear-search" class="clear-search-btn" aria-label="Wyczyść wyszukiwanie" style="display: none;">
+                            <i data-lucide="x"></i>
+                        </button>
+                    </div>
+                    <div id="search-suggestions" class="search-suggestions" style="display: none;" role="listbox" aria-label="Podpowiedzi wyszukiwania"></div>
+                </div>
+                <div class="search-results-info" id="search-results-info" style="display: none;">
+                    <span id="results-count">0</span> wyników dla: "<span id="search-term"></span>"
+                </div>
+            </div>
+
             <div class="category-filter">
                 <div class="category-header">
                     <h2>Wybierz kategorię</h2>
@@ -23,8 +50,19 @@
                     <!-- Category buttons will be inserted here by JavaScript -->
                 </div>
             </div>
-            <div class="movie-grid">
+            <div class="movie-grid" id="movies-grid">
                 <!-- Movies will be inserted here by JavaScript -->
+            </div>
+            <div class="no-results" id="no-results" style="display: none;">
+                <div class="no-results-content">
+                    <i data-lucide="search-x" class="no-results-icon"></i>
+                    <h3>Brak wyników</h3>
+                    <p>Nie znaleziono filmów spełniających kryteria wyszukiwania.</p>
+                    <button id="reset-search" class="btn btn-primary">
+                        <i data-lucide="refresh-cw"></i>
+                        <span>Wyczyść filtry</span>
+                    </button>
+                </div>
             </div>
         </div>
     </main>

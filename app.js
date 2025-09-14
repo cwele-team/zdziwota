@@ -491,7 +491,9 @@ async function ensureCategoriesLoaded() {
       // Get category from URL if present
       const urlParams = new URLSearchParams(window.location.search);
       const selectedCategory = urlParams.get('category');
+      const searchQuery = urlParams.get('search');
       console.log('Selected category from URL:', selectedCategory);
+      console.log('Search query from URL:', searchQuery);
 
       // Create category filter using database categories
       const categoryTagsContainer = document.getElementById('category-tags');
@@ -509,17 +511,25 @@ async function ensureCategoriesLoaded() {
       const categoryTags = document.querySelectorAll('.category-tag');
       const movieGrid = document.querySelector('.movie-grid');
 
-      // Display initial movies based on selected category
-      const initialMovies = selectedCategory ?
-        movies.filter(movie => movie.categories && movie.categories.includes(selectedCategory)) :
-        movies;
+      // Initialize search functionality
+      initializeSearchFunctionality();
+
+      // Display initial movies based on selected category and search
+      let initialMovies = movies;
+      
+      if (selectedCategory) {
+        initialMovies = initialMovies.filter(movie => movie.categories && movie.categories.includes(selectedCategory));
+      }
+      
+      if (searchQuery) {
+        initialMovies = filterMoviesBySearch(initialMovies, searchQuery);
+        document.getElementById('movie-search-input').value = searchQuery;
+        showSearchResults(searchQuery, initialMovies.length);
+      }
 
       console.log('Initial movies to display:', initialMovies.length);
 
-      movieGrid.innerHTML = initialMovies.map((movie, index) => {
-        const originalIndex = movies.findIndex(m => m.title === movie.title);
-        return createMovieCard(movie, originalIndex);
-      }).join('');
+      displayMovies(initialMovies);
 
       setupMovieOverlay();
 
@@ -537,29 +547,362 @@ async function ensureCategoriesLoaded() {
           });
           tag.setAttribute('aria-pressed', 'true');
 
-          // Filter movies
-          const filteredMovies = selectedCategoryName === 'all' ?
-            movies :
-            movies.filter(movie => movie.categories && movie.categories.includes(selectedCategoryName));
-
-          console.log('Filtered movies:', filteredMovies.length);
-
-          // Update movie grid
-          movieGrid.innerHTML = filteredMovies.map((movie, index) => {
-            const originalIndex = movies.findIndex(m => m.title === movie.title);
-            return createMovieCard(movie, originalIndex);
-          }).join('');
-
-          // Update URL without page reload
-          const newUrl = selectedCategoryName === 'all' ? 
-            window.location.pathname : 
-            `${window.location.pathname}?category=${encodeURIComponent(selectedCategoryName)}`;
-          window.history.pushState({}, '', newUrl);
-
-          setupMovieOverlay();
+          // Apply both category and search filters
+          applyFilters(selectedCategoryName);
         });
       });
     }
+
+    // Function to initialize search functionality
+    function initializeSearchFunctionality() {
+      const searchInput = document.getElementById('movie-search-input');
+      const clearSearchBtn = document.getElementById('clear-search');
+      const searchSuggestions = document.getElementById('search-suggestions');
+      const resetSearchBtn = document.getElementById('reset-search');
+      
+      let searchTimeout;
+      let currentSuggestionIndex = -1;
+
+      // Search input handler with debouncing
+      searchInput.addEventListener('input', (e) => {
+        const query = e.target.value.trim();
+        
+        // Show/hide clear button
+        clearSearchBtn.style.display = query ? 'flex' : 'none';
+        
+        // Clear previous timeout
+        clearTimeout(searchTimeout);
+        
+        if (query.length === 0) {
+          hideSuggestions();
+          applyFilters();
+          hideSearchResults();
+          return;
+        }
+        
+        // Debounce search
+        searchTimeout = setTimeout(() => {
+          if (query.length >= 2) {
+            showSuggestions(query);
+            applyFilters(null, query);
+          }
+        }, 300);
+      });
+
+      // Clear search button
+      clearSearchBtn.addEventListener('click', () => {
+        searchInput.value = '';
+        clearSearchBtn.style.display = 'none';
+        hideSuggestions();
+        applyFilters();
+        hideSearchResults();
+        searchInput.focus();
+        updateURL();
+      });
+
+      // Reset search button
+      if (resetSearchBtn) {
+        resetSearchBtn.addEventListener('click', () => {
+          searchInput.value = '';
+          clearSearchBtn.style.display = 'none';
+          hideSuggestions();
+          hideSearchResults();
+          
+          // Reset category selection
+          const categoryTags = document.querySelectorAll('.category-tag');
+          categoryTags.forEach(tag => tag.classList.remove('active'));
+          document.querySelector('.category-tag[data-category="all"]').classList.add('active');
+          
+          applyFilters();
+          searchInput.focus();
+          updateURL();
+        });
+      }
+
+      // Keyboard navigation for suggestions
+      searchInput.addEventListener('keydown', (e) => {
+        const suggestions = searchSuggestions.querySelectorAll('.search-suggestion');
+        
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          currentSuggestionIndex = Math.min(currentSuggestionIndex + 1, suggestions.length - 1);
+          updateSuggestionHighlight(suggestions);
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          currentSuggestionIndex = Math.max(currentSuggestionIndex - 1, -1);
+          updateSuggestionHighlight(suggestions);
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          if (currentSuggestionIndex >= 0 && suggestions[currentSuggestionIndex]) {
+            selectSuggestion(suggestions[currentSuggestionIndex]);
+          } else {
+            hideSuggestions();
+            applyFilters(null, searchInput.value.trim());
+          }
+        } else if (e.key === 'Escape') {
+          hideSuggestions();
+          currentSuggestionIndex = -1;
+        }
+      });
+
+      // Hide suggestions when clicking outside
+      document.addEventListener('click', (e) => {
+        if (!searchInput.contains(e.target) && !searchSuggestions.contains(e.target)) {
+          hideSuggestions();
+        }
+      });
+    }
+
+    // Function to show search suggestions
+    function showSuggestions(query) {
+      const searchSuggestions = document.getElementById('search-suggestions');
+      const suggestions = generateSuggestions(query);
+      
+      if (suggestions.length === 0) {
+        hideSuggestions();
+        return;
+      }
+      
+      searchSuggestions.innerHTML = suggestions.map((suggestion, index) => `
+        <div class="search-suggestion" data-type="${suggestion.type}" data-value="${suggestion.value}" role="option" tabindex="-1">
+          <i data-lucide="${suggestion.icon}" class="suggestion-icon"></i>
+          <div class="suggestion-content">
+            <span class="suggestion-text">${highlightMatch(suggestion.text, query)}</span>
+            <span class="suggestion-type">${suggestion.typeLabel}</span>
+          </div>
+        </div>
+      `).join('');
+      
+      searchSuggestions.style.display = 'block';
+      lucide.createIcons();
+      
+      // Add click handlers to suggestions
+      searchSuggestions.querySelectorAll('.search-suggestion').forEach(suggestion => {
+        suggestion.addEventListener('click', () => selectSuggestion(suggestion));
+      });
+    }
+
+    // Function to generate suggestions based on query
+    function generateSuggestions(query) {
+      const suggestions = [];
+      const queryLower = query.toLowerCase();
+      const maxSuggestions = 8;
+      
+      // Movie title suggestions
+      const movieSuggestions = movies
+        .filter(movie => movie.title.toLowerCase().includes(queryLower))
+        .slice(0, 4)
+        .map(movie => ({
+          type: 'movie',
+          value: movie.title,
+          text: movie.title,
+          typeLabel: 'Film',
+          icon: 'film'
+        }));
+      
+      // Category suggestions
+      const categorySuggestions = categories
+        .filter(category => category.name.toLowerCase().includes(queryLower))
+        .slice(0, 3)
+        .map(category => ({
+          type: 'category',
+          value: category.name,
+          text: category.name,
+          typeLabel: 'Kategoria',
+          icon: 'tag'
+        }));
+      
+      // Author suggestions
+      const authorSuggestions = [...new Set(movies
+        .filter(movie => movie.authors && movie.authors.toLowerCase().includes(queryLower))
+        .map(movie => movie.authors))]
+        .slice(0, 2)
+        .map(author => ({
+          type: 'author',
+          value: author,
+          text: author,
+          typeLabel: 'Autor',
+          icon: 'user'
+        }));
+      
+      suggestions.push(...movieSuggestions, ...categorySuggestions, ...authorSuggestions);
+      
+      return suggestions.slice(0, maxSuggestions);
+    }
+
+    // Function to highlight matching text in suggestions
+    function highlightMatch(text, query) {
+      const regex = new RegExp(`(${query})`, 'gi');
+      return text.replace(regex, '<mark>$1</mark>');
+    }
+
+    // Function to update suggestion highlight
+    function updateSuggestionHighlight(suggestions) {
+      suggestions.forEach((suggestion, index) => {
+        suggestion.classList.toggle('highlighted', index === currentSuggestionIndex);
+      });
+    }
+
+    // Function to select a suggestion
+    function selectSuggestion(suggestionElement) {
+      const type = suggestionElement.dataset.type;
+      const value = suggestionElement.dataset.value;
+      const searchInput = document.getElementById('movie-search-input');
+      
+      if (type === 'category') {
+        // Select category and clear search
+        const categoryTag = document.querySelector(`[data-category="${value}"]`);
+        if (categoryTag) {
+          categoryTag.click();
+        }
+        searchInput.value = '';
+        document.getElementById('clear-search').style.display = 'none';
+      } else {
+        // Set search value and apply filter
+        searchInput.value = value;
+        document.getElementById('clear-search').style.display = 'flex';
+        applyFilters(null, value);
+      }
+      
+      hideSuggestions();
+    }
+
+    // Function to hide suggestions
+    function hideSuggestions() {
+      const searchSuggestions = document.getElementById('search-suggestions');
+      searchSuggestions.style.display = 'none';
+      currentSuggestionIndex = -1;
+    }
+
+    // Function to filter movies by search query
+    function filterMoviesBySearch(moviesToFilter, query) {
+      if (!query) return moviesToFilter;
+      
+      const queryLower = query.toLowerCase();
+      return moviesToFilter.filter(movie => 
+        movie.title.toLowerCase().includes(queryLower) ||
+        movie.description.toLowerCase().includes(queryLower) ||
+        movie.genre.toLowerCase().includes(queryLower) ||
+        movie.categories.some(cat => cat.toLowerCase().includes(queryLower)) ||
+        (movie.authors && movie.authors.toLowerCase().includes(queryLower)) ||
+        (movie.tag && movie.tag.toLowerCase().includes(queryLower))
+      );
+    }
+
+    // Function to apply both category and search filters
+    function applyFilters(selectedCategory = null, searchQuery = null) {
+      // Get current active category if not provided
+      if (selectedCategory === null) {
+        const activeCategory = document.querySelector('.category-tag.active');
+        selectedCategory = activeCategory ? activeCategory.dataset.category : 'all';
+      }
+      
+      // Get current search query if not provided
+      if (searchQuery === null) {
+        const searchInput = document.getElementById('movie-search-input');
+        searchQuery = searchInput ? searchInput.value.trim() : '';
+      }
+      
+      let filteredMovies = movies;
+      
+      // Apply category filter
+      if (selectedCategory !== 'all') {
+        filteredMovies = filteredMovies.filter(movie => 
+          movie.categories && movie.categories.includes(selectedCategory)
+        );
+      }
+      
+      // Apply search filter
+      if (searchQuery) {
+        filteredMovies = filterMoviesBySearch(filteredMovies, searchQuery);
+        showSearchResults(searchQuery, filteredMovies.length);
+      } else {
+        hideSearchResults();
+      }
+      
+      console.log('Filtered movies:', filteredMovies.length);
+      
+      // Display results
+      displayMovies(filteredMovies);
+      
+      // Update URL
+      updateURL(selectedCategory, searchQuery);
+    }
+
+    // Function to display movies
+    function displayMovies(moviesToDisplay) {
+      const movieGrid = document.getElementById('movies-grid');
+      const noResults = document.getElementById('no-results');
+      
+      if (moviesToDisplay.length === 0) {
+        movieGrid.style.display = 'none';
+        noResults.style.display = 'block';
+      } else {
+        movieGrid.style.display = 'grid';
+        noResults.style.display = 'none';
+        
+        movieGrid.innerHTML = moviesToDisplay.map((movie) => {
+          const originalIndex = movies.findIndex(m => m.title === movie.title);
+          return createMovieCard(movie, originalIndex);
+        }).join('');
+      }
+      
+      setupMovieOverlay();
+    }
+
+    // Function to show search results info
+    function showSearchResults(query, count) {
+      const searchResultsInfo = document.getElementById('search-results-info');
+      const resultsCount = document.getElementById('results-count');
+      const searchTerm = document.getElementById('search-term');
+      
+      if (searchResultsInfo && resultsCount && searchTerm) {
+        resultsCount.textContent = count;
+        searchTerm.textContent = query;
+        searchResultsInfo.style.display = 'block';
+      }
+    }
+
+    // Function to hide search results info
+    function hideSearchResults() {
+      const searchResultsInfo = document.getElementById('search-results-info');
+      if (searchResultsInfo) {
+        searchResultsInfo.style.display = 'none';
+      }
+    }
+
+    // Function to update URL with current filters
+    function updateURL(category = null, search = null) {
+      const url = new URL(window.location);
+      
+      // Get current values if not provided
+      if (category === null) {
+        const activeCategory = document.querySelector('.category-tag.active');
+        category = activeCategory ? activeCategory.dataset.category : 'all';
+      }
+      
+      if (search === null) {
+        const searchInput = document.getElementById('movie-search-input');
+        search = searchInput ? searchInput.value.trim() : '';
+      }
+      
+      // Update URL parameters
+      if (category && category !== 'all') {
+        url.searchParams.set('category', category);
+      } else {
+        url.searchParams.delete('category');
+      }
+      
+      if (search) {
+        url.searchParams.set('search', search);
+      } else {
+        url.searchParams.delete('search');
+      }
+      
+      // Update URL without page reload
+      window.history.pushState({}, '', url);
+    }
+
 
     // Populate movie rows with proper positioning of information
     document.addEventListener('DOMContentLoaded', async () => {
